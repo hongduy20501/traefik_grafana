@@ -1,0 +1,169 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql
+    #container_name: db
+    networks:
+      - network
+    environment:
+      MYSQL_ROOT_PASSWORD: hongduy
+      MYSQL_DATABASE: grafana
+      MYSQL_USER: duy
+      MYSQL_PASSWORD: hongduy
+    volumes:
+      - dbdata:/var/lib/mysql
+    deploy:
+      placement:
+        constraints:
+          - node.labels.grafana-db == true
+          
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    #links:
+     # - db
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_ARBITRARY: 1
+    #restart: always
+    networks:
+      - network
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.phpmyadmin == true
+
+  phpmyadmin_proxy:
+    image: harbor.elofun.net/core/nginx-proxy:0.0.1
+    networks:
+      - network
+      - traefikv2_public
+    environment:
+      #CHECK_PROXY_UPSTREAM: 0
+      PROXY_MAP: |
+        / => grafana_phpmyadmin/
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - ingress.host=phpmyadmin.learndevops.id.vn
+      
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - /home/duy/duy/config/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    networks:
+      - network
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.prometheus == true
+
+  alertmanager:
+    image: prom/alertmanager
+    volumes:
+      - /home/duy/duy/config/alertmanager:/etc/alertmanager
+    networks:
+      - network
+    command:
+      - --config.file=/etc/alertmanager/config.yml
+      - --storage.path=/alertmanager
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.alertmanager == true
+
+  node-exporter:
+    image: prom/node-exporter
+    hostname: '{{.Node.Hostname}}'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command: 
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.ignored-mount-points
+      - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+    networks:
+      - network
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+  grafana:
+    image: grafana/grafana
+    
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - /home/duy/duy/config/grafana:/etc/grafana/provisioning
+      - /home/duy/duy/config/grafana.ini:/etc/grafana/grafana.ini:ro
+      #- /home/duy/duy/config/emails:/usr/share/grafana/public/emails
+    networks:
+      - network
+    environment:
+
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+          - node.labels.grafana == true
+
+  grafana_proxy:
+    image: harbor.elofun.net/core/nginx-proxy:0.0.1
+    networks:
+      - network
+      - traefikv2_public
+    environment:
+      #CHECK_PROXY_UPSTREAM: 0
+      PROXY_MAP: |
+        / => grafana_grafana:3000/
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - ingress.host=grafana.learndevops.id.vn
+
+  prometheus_proxy:
+    image: harbor.elofun.net/core/nginx-proxy:0.0.1
+    networks:
+      - network
+      - traefikv2_public
+    environment:
+      #CHECK_PROXY_UPSTREAM: 0
+      PROXY_MAP: |
+        / => grafana_prometheus:9090/
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - ingress.host=prometheus.learndevops.id.vn
+volumes:
+  grafana_data:
+  prometheus_data:
+  dbdata:
+
+networks:
+  network:
+  traefikv2_public:
+    external: true
